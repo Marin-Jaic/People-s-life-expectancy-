@@ -1,0 +1,389 @@
+---
+title: "Životni vijek ljudi"
+author: "Sapali grad"
+date: "2022-12-15"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(readr)
+library(stringr)
+library(hflights)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+library(tinytex)
+require(nortest)
+library(gridExtra)
+library(GGally)
+library(stringr)
+options(dplyr.summarise.inform = FALSE)
+```
+
+U ovom izvještaju baviti ćemo se analizom podataka vezanih uz svjetske zdravstvene standarde, životno očekivanje i faktore koji na njih utječu.
+
+## Učitavanje i početna analiza podataka
+
+
+```{r, include = F}
+data <- read_csv("zivotni_vijek_ljudi.csv")
+```
+```{r}
+head(data)
+```
+
+
+\newpage
+##  1. Postoji li razlika u konzumaciji alkohola tijekom godina medu svjetskim regijama?
+
+Vidimo da podatke trebamo podijeliti na klase na temelju dvaju parametara te zatim testirati nultu hipotezu oblika "sve srednje vrijednosti su jednake".$\\$
+Uočavamo da se ovdje vrlo vjerojatno radi o dvofaktorskoj ANOVI.$\\$
+Započinjemo transformacijom i vizualizacijom podataka.
+Prikazati ćemo podatke grupirane po jednom pa po drugom parametru, tj. regiji pa godinama i zatim po oba parametra.
+```{r}
+#Prikazivanje podataka
+g1 <- ggplot(data, aes(x = region, y = alcohol)) + geom_boxplot() + labs(y = "alcohl [l/year]")
+g2 <- ggplot(data %>% mutate(year = as.factor(year), alcohol),  aes(x = year, y = alcohol))+
+  geom_boxplot() + labs(y = "alcohl [l/year]")
+
+#Jednostavna transformacija i ujedinjavanje redaka za olakšavanje 
+#daljnje analize
+inter = interaction(data$region,data$year)
+classData <- data %>% unite(col =class, year, region, sep = "_", remove = T)
+g3 <- ggplot(classData, aes(x = class, y = alcohol)) + geom_boxplot() +
+  labs(y = "alcohl [l/year]") + theme_void()
+
+g1
+g2
+g3
+```
+Primjećujemo da se podaci ponašaju izuzetno lijepo kad podatke klasificiramo po godinama, ali veoma neujednačeno u klasifikacije po regijama.$\\$
+Uz to, makar je ispis boxplota koji je podjeljen po svim klasama veoma nečitljiv, možemo uočiti uzorak koji se ponavlja iz godine u godinu kako se regije izmijenjuju. Što je i za očekivati jer nismo uočili veliku varijabilnosti pri klasifikaciji po godinama, ali je ona prisutna kada klasificiramo po regijama 
+$\\$
+Sljedeći je korak provjera normalnosti unutar svake od 96 i klasa i provjera homoskedastičnosti među klasama.
+```{r, include = F}
+#Stvaramo vektore koji serijaliziraju izvođenje lillieforovih testova
+years = unique(data$year) %>% unlist(use.names = F)
+regions = unique(data$region) %>% unlist(use.names = F)
+
+#Provodimo testove
+for(godina in years){
+  for(regija in regions) {
+    temp = data %>% filter(year == godina, region == regija) %>% select(alcohol)
+    cat(godina, regija, "\n")
+    print(lillie.test(temp$alcohol))
+  }
+}
+```
+
+Nismo uključili ispis 96 lillieforova testa, ali podaci pretežito nisu normalno distribuirani.$\\$
+ANOVA na našu sreću, jest relativno robusna na kršenje uvjeta normalnosti, ali ju puno više smeta narušavanje homoskedastičnosti (pogotovo uz nejednake veličine uzoraka kao u našem slučaju).$\\$
+Provjeravamo homoskedastičnost bartlettovim testom.
+
+```{r}
+bartlett.test(classData$alcohol~classData$class)
+```
+Dobivamo p-value reda $10^{-16}$ te smo primorani odbaciti nul hipotezu da su varijance među klasama jednake. Kako nam osnovne pretpostavke ne vrijede, okrećemo se neparametarskoj ANOVI, Kruskal-Wallis testu. Valjalo bi napomenuti da makar ovdje klasificiramo po dva parametra, ustvari ćemo testiranje hipoteza svesti na jednostruku ANOVU koja se klasificira po jednom parametru, ali je taj paramtear uređenja dvojka (godina, regija).$\\$
+
+Testiramo hipotezu:
+$$\begin{aligned} H_0: \mu_{2000, Afrika} = \mu_{2000, Americas} = \space ... \space=  \mu_{2016, Western Pacific} \\ 
+H_1: barem \space jedan \space \mu_{i,j} \space nije \space jednak  \\ 
+\alpha = 0.05 \\ 
+i \in N, i \in  [2000, 2016] \\ j \in \{Africa, Americas, ..., Western Pacific\}
+\end{aligned}$$
+```{r}
+kruskal.test(classData$alcohol~classData$class)
+```
+Provođenjem Kruskal-Wallis testa dobivamo p-value koji je debelo zakoračio u kritični odsječak te odbacujemo nul hipotezu i zaključujemo da postoji razlika u konzumaciji alkohola među svjetskim regijama i godinama.$\\$
+Međutim, boxplotovi koje smo nacrtali nameću pitanje: Utječe li na naš zaključak uopće prisustvo klasifikacije po godinama?$\\$
+Stoga provodimo jedan dodatan Kruskal-Wallis test kojim provjeravamo je li srednja vrijednost ista u ovisnosti o godinama.
+```{r}
+kruskal.test(data$alcohol~data$year)
+```
+Kao što smo i sumnjali, provođenjem drugog Kruskal-Wallis testa dobivamo p-value koji teži u 1 i zaključujemo da su srednje vrijednosti konzumacije alkohola jednake po godinama. Iz čega donosimo zaključak da je regija parametar koji zapravo utječe na razliku među srednjim vrijednostima.
+\newpage
+
+##  2. Razlikuje li se količina uloženog novca u zdravstvenu skrb izmedu zemalja jugoistočne Azije i zemalja zapadnog Pacifika?
+
+Pitanje nas odma navodi na ideju provođenja standardnog t-testa, ali prvo transformiramo podatke, provjeravamo pretpostavku normalnosti i pokušavamo ukloniti potencijalnu zavisnost.$\\$
+Trebamo srednju vrijednost uloženog novca u zdravstvenu skrb u regijama Southeast Asia i Western Pacific. Kako naš uzorak sadrži očitanja iz više država u vremenskom periodu od više godina, bilo bi naivno očekivati da su rezultati iz iste države nezavisni kroz godine. Osim toga, neke države nemaju zabilježene tražene podatke u svim godinama te bi zbog toga došlo do disbalansa.$\\$
+Stoga je naš prvi korak nakon grupiranja po regijama, grupiranje i po država i računanje srednje vrijednosti za svaku od njih. $\\$
+Nakon toga provjeravamo jesu li podaci aproksimativno normalni u prirodi.
+
+```{r}
+#Grupiranje podataka
+seData <- filter(data, region == "South-East Asia" & !is.na(che_gdp)) %>%
+  group_by(country) %>% summarise(mean_che = mean(che_gdp, na.rm = T)) %>%
+  select(mean_che) %>% ungroup 
+
+wpData <- filter(data, region == "Western Pacific" & !is.na(che_gdp)) %>%
+  group_by(country) %>% summarise(mean_che = mean(che_gdp, na.rm = T)) %>%
+  select(mean_che) %>% ungroup 
+
+#Vizualizacija podataka
+g1 <- ggplot(seData, aes(x = mean_che)) + 
+  geom_histogram(bins = 10, fill = "purple") + 
+  labs(title = "South-East Asia", x = "Mean che_gdp [%]")
+g2 <- ggplot(wpData, aes(x = mean_che)) + 
+  geom_histogram(bins = 10, fill = 6) +
+  labs(title = "South-East Asia", x = "Mean che_gdp [%]")
+
+#Uređivanje ispisa
+grid.arrange(g1, g2, ncol = 2)
+
+#Generiranje qq grafova
+g1 <- ggplot(seData, aes(sample = mean_che)) + geom_qq() +
+  geom_qq_line() + labs(title = "South-East Asia")
+g2 <- ggplot(wpData, aes(sample = mean_che)) + geom_qq() +
+  geom_qq_line() + labs(title = "Western Pacific")
+
+#Uređivanje ispisa
+grid.arrange(g1, g2, ncol = 2)
+```
+Vidimo da se podaci ponašaju pretežito normalno s pokojim outlierom, ali t-test nije ništa ako ne robustan tako da postavljamo hipotezu.
+
+$$\begin{aligned} H_0: \mu_0 = \mu_1 \\ H_1: \mu_0 \neq \mu_1 \\ \alpha = 0.05\end{aligned}$$
+Provodimo t-test sa razinom značajnosti 5%.
+```{r}
+#Samostalno računamo sve podatke potrebne za provođenje testa kako se ne bi potkrala pogreška
+
+length(seData) -> n0
+length(wpData) -> n1
+
+seData <- seData %>% unlist(use.names = F)
+wpData <- wpData %>% unlist(use.names = F)
+
+seData %>% mean(na.rm = T) -> mi0
+wpData %>% mean(na.rm = T) -> mi1
+
+seData %>% sd(na.rm = T) -> s0
+wpData %>% sd(na.rm = T) -> s1
+
+var.test(seData, wpData, alternative = "two.sided")
+
+
+#Provodeći f-test donosimo zaključak da nema značajne razlike među varijancama 
+#dvaju uzoraka i stoga koristimo "Pooled t-statistiku"
+
+cat("mi0:", mi0, " s0: ", s0, " n0:", n0, "\n")
+cat("mi1:", mi1, " s1: ", s1, " n1:", n1, "\n")
+cat("stupnjevi slobode:", as.character(n0 + n1 - 2) , "\n")
+```
+
+```{r}
+#Provodimo t-test
+t.test(seData, wpData, conf.level = 0.95, var.equal = T)
+
+```
+Kako smo proveli test s razinom značajnosti 5%, a naš p-value iznosi 7.28%, ne odbacujemo početnu hipotezu i donosimo zaključak da se količina uloženog novca u zdravstvenu skrb ne razlikuje među dvije regije.
+Ipak, ovo je odličan pokazatelj toga zašto se rezultati statističih istraživanja trebaju uzimati sa zrnom soli. Da smo samo malo podesili razinu značajnosti ili odbacili pokoje stršeće vrijednosti u ime očuvanja distribucije podataka defintivno smo mogli donijeti oprečan zaključak kada bi nam to bilo u interesu.
+
+\newpage
+## 3. Može li se na temelju zadanih parametara objasniti očekivani životni vijek ljudi u Europi u 2015. godini?
+
+Pitanje nas navodi na traženje neke međuovisnosti između životnog očekivanja i nekih od parametara.
+Kao i uvijek počinjemo vizualizacijom podataka i nadamo se da ćemo uočiti neku linearnu vezu ili vezu koju ćemo nekom transforamcijom moći učiniti linearnom.$\\$
+Neki od podataka koje intuitivno očekujemo da bi mogli imati utjecaj na životno očekivanje su, ulaganje u zdravstvo, količina doktora, infantilni mortalitet, i slični.
+
+```{r}
+#Filtriramo podatke
+linRegData <- data %>% filter(year == "2015", region == "Europe",
+                              !is.na(life_expect), !is.na(che_gdp))
+linRegData$obesity <- linRegData$`age5-19obesity`
+linRegData$thinness <- linRegData$`age5-19thinness`
+
+#Stvaramo scatter-plotove
+g1 <- ggplot(linRegData, aes(x = che_gdp, y = life_expect)) + 
+  geom_point() + labs(title = 1, y = "Life expectancy [years]"
+                      , x = "Che_gdp [%]")
+g2 <- ggplot(linRegData, aes(x = doctors, y = life_expect)) + 
+  geom_point() + labs(title = 2, y = "Life expectancy [years]"
+                      , x = "Doctors [/10 000]")
+g3 <- ggplot(linRegData, aes(x = infant_mort, y = life_expect)) + 
+  geom_point() + labs(title = 3, y = "Life expectancy [years]"
+                      , x = "Infant mortality [%]")
+g4 <- ggplot(linRegData, aes(x = bmi, y = life_expect)) + 
+  geom_point() + labs(title = 4, y = "Life expectancy [years]"
+                      , x = "Bmi [kg/m^2]")
+g5 <- ggplot(linRegData, aes(x = une_poverty, y = life_expect)) + 
+  geom_point() + labs(title = 5, y = "Life expectancy [years]"
+                      , x = "Poverty [%]")
+g6 <- ggplot(linRegData, aes(x = thinness, y = life_expect)) + 
+  geom_point() + labs(title = 6, y = "Life expectancy [years]"
+                      , x = "Thinnes ages 4-19 [%]")
+
+#Redamo ih na lakše pregledan grid
+grid.arrange(g1, g2, g3, g4, g5, g6, ncol = 3)
+
+```
+Uočavamo da se u prvom grafu nazire nekakva linearna veza koju bi očekivali u stvarnim podacima.$\\$
+U drugom i četvrtom grafu je varijabilnost životnog očekivanja pri fiksiranju vrijednosti na x osi maltene jednaka za svaki x što je jako dobar indikator da ne postoji linearna veza.$\\$
+U trećem pak grafu isto uočavamo vezu koja je potencijalno polinomijalne prirode, i nečemo ju ubacivati u naš linearni model.$\\$
+Peti graf ne pokazuje obećavajuće znakove linearne ovisnosti.$\\$
+U šestom grafu vidimo veoma očite naznake linearne ovisnosti.$\\$
+
+Fokusirati ćemo se na prvi i šesti graf, tj kako thinness i ulaganje države u zdravstvo utheče na životno očekivanje. Koristimo linearni model s dva regresora.$\\$
+Pri tome bi trebali provjeriti pretpostavke Linearna regresije da su reziduali iz normalne distribuirane s jednakom varijancom i očekivanjem 0. Nažalost homogenost varijance ćemo teško provjeriti na skupu ove veličine.
+```{r}
+#Radimo model
+linModel <- lm(life_expect~che_gdp+thinness, linRegData)
+summary(linModel)
+
+#Provjeravamo pretpostavaku linearne regresije da su reziduali iz normalne 
+#razdiobe
+lillie.test(linModel$residuals)
+
+```
+
+Sada testiramo hipotezu:
+$$\begin{aligned}H_0: \mu_{e} = 0
+\\ H_1: \mu_{e} \ne 0  \\ \alpha = 0.05 \end{aligned}$$
+```{r}
+#Provjeravamo je li očekivanje 0 sa razinom značajnosti 0.05
+t.test(linModel$residuals, conf.level = 0.95)
+```
+Sa šokantnom p-vrijednošću iznosa 1, ne odbacujemo nul hipotezu i donosimo zaključak da su pretpostavke modela ispunjene.$\\$
+Model s dva regresora che_gdp i thinness nam daje $R^2 = 0.72$  što je izuzetno dobro. Uz to lillieforsov test normalnosti proveden nad rezidualima daje p-value od 0.1363 te nemama potrebe odbaciti nultu hipotezu tog testa koja jest da su reziduali normalno distribuirani.$\\$
+Ipak, moramo bit svijesni činjenice da dodavanjem regresora u model skoro sigurno povećavamo faktor $R^2$ neovisno o tome ima li taj regresor zapravo ikakav utjecaj na promatrani parametar. Stoga moramo biti oprezni pri dodavanju modela jer dodavanjem "garbage" podataka možemo stvoriti iluziju da gradimo dobar model. Iznos $\\$
+Tu u igru ulazi $adjusted \space R^2$ čija je zadaća penaliziranje ocjene modela pri dodavanju regresora koji ne povećavaju $R^2$ onoliko koliko bi bilo očekivano. Stoga bi kako ubacujemo regresore u naš model, trebali sve više i više pozornosti obraćati na $adjusted \space R^2.\\$
+Naš $adjusted \space R^2$ iznosi otprilike 0.71 što je dovoljno blizu iznosu našeg $R^2$ te nas navodi na zaključak da naš model ima dobru snagu predviđanja$\\$
+
+Svoj model s dva regresora tada možemo opisati na sljedeči način:
+$$\hat{y}_i = b_0 + b_1x_{1i} + b_2x_{2i} + e_i \\$$
+gdje $x_1$ predstavlja gdp_che, $x_2$ thinness, a $e$ rezidual.
+S uvrštenim koeficijentima koje vidimo kao izlaz funkcije summary(linModel) model izgleda ovako:
+$$\hat{y}_i = 80 + 0.39x_1 - 3.17x_2 + e_i \\$$
+Iz formule i grafova koji slijede je jasno da postoji pozitivna linearna veza između državnog ulaganja u zdravstveni sustav i očekivanog trajanja života, te negativna linearna veza između stopa mršavosti i očekivanog trajanja života. 
+```{r}
+g1 <- g1 + stat_smooth(formula = y~x, method = "lm", se = F) + labs(title = "life_expect~che_gdp")
+g2 <- g6 + stat_smooth(formula = y~x, method = "lm", se = F) + labs(title = "life_expect~thinness")
+grid.arrange(g1, g2, ncol = 2)
+```
+Ovo je ustvari veoma zdravorazumski rezultat.$\\$
+Države koje više ulažu u javno zdravstvo pružaju prosječnom građaninu bolju zdravstvenu skrb, lijekove i uslugu. Dok pak pretjerana mršavost ima znatne negativne učinke na zdravlje kao što su veći rizik visokog tlaka, dijabetesa, raznih drugih srčanih problema, pada imuniteta itd. 
+
+\newpage
+## 4. Ima li razlike u trendovima zaraženosti/imunizacije različitim bolestima medu svjetskim regijama?
+
+Iz postavljenog pitanja, očito je da radimo jednoparametarsku analizu varijance.$\\$
+Za ispitivanje ovog pitanja uzimati ćemo najsvježije podatke iz 2016.
+Prije početka ispitivanja filtrirat ćemo i vizualizirati podatke iz svih regija barplotovima kako bi dobili bolji uvid u cijelu situaciju.
+
+```{r}
+medDataFiltered <- filter(data, year == 2016) 
+hivData <- medDataFiltered %>% group_by(region) %>%
+  summarise(hiv = mean(une_hiv, na.rm = T)) %>% ungroup()
+measlesData <- medDataFiltered %>% group_by(region) %>% 
+  summarise(measles = mean(measles, na.rm = T)) %>% ungroup()
+polioData <- medDataFiltered %>% group_by(region) %>% 
+  summarise(polio = mean(polio, na.rm = T)) %>% ungroup()
+diphtheriaData <- medDataFiltered %>% group_by(region) %>% 
+  summarise(diphtheria = mean(diphtheria, na.rm = T)) %>% ungroup()
+
+#pomocna funkcija za jednokratnu transformaciju regija kako bi ispis 
+#grafova bio ljepsi
+
+transformLabs <- function(labs){
+  for(i in 1:length(labs)){
+    if(labs[i] == "Africa"){
+      labs[i] = "AF"
+    } else if(labs[i] == "Americas"){
+      labs[i] = "AM" 
+    } else if(labs[i] == "Eastern Mediterranean") {
+      labs[i] = "EM"
+    } else if(labs[i] == "Europe"){
+      labs[i] = "EU"
+    } else if(labs[i] == "South-East Asia"){
+      labs[i] = "SEA"
+    } else if(labs[i] == "Western Pacific"){
+      labs[i] = "WP"
+    }
+  }
+
+  return (labs)
+}
+
+g1 <- hivData %>% mutate(region = transformLabs(region), hiv) %>% 
+  ggplot(aes(x = region, y = hiv)) + geom_bar(stat = "identity", fill = 5) + 
+  labs(y = "hiv prevalence[%]") 
+
+g2 <- measlesData %>% mutate(region = transformLabs(region), measles) %>% 
+  ggplot(aes(x = region, y = measles)) + 
+  geom_bar(stat = "identity", fill = "purple") + 
+  labs(y = "measles immunization [%]") 
+
+g3 <- polioData %>% mutate(region = transformLabs(region), polio) %>% 
+  ggplot(aes(x = region, y = polio)) + 
+  geom_bar(stat = "identity", fill = 6) + labs(y = "polio immunization [%]")
+
+g4 <- diphtheriaData %>% mutate(region = transformLabs(region), diphtheria) %>%
+  ggplot(aes(x = region, y = diphtheria)) + 
+  geom_bar(stat = "identity", fill = 4) + 
+  labs(y = "diptheria immunization [%]") 
+
+grid.arrange(g1, g2, g3, g4, ncol = 2)
+```
+Gledajući na ovakvoj skali, podaci se, osim onih za hiv, čine relativno ujednačenima. Ipak tako se čine, zbog skale. U stvarnosti podaci nisu pretjerano ujednačeni i već sad očekujemo da će ANOVA pokazati da postoji razlika u trendu zaraženosti/imunizacije u svijetskim regijama. $\\$
+Prije nego što to pokažemo, na redu je provjeravanje pretpostavki ANOVE tj. normalna razdioba i homoskedastičnost (iste varijance među klasama).
+```{r}
+#Provjeravamo normalnost podataka qqplotom jer bi bilo puno previse ispisa kada bi smo radili 
+#Lillieforsov test na svakoj od klasa 
+ggplot(medDataFiltered, aes(sample = une_hiv, na.rm = T)) + 
+  stat_qq_line() + stat_qq()+ facet_wrap(~region) + labs(title = "HIV") 
+ggplot(medDataFiltered, aes(sample = polio, na.rm = T)) + 
+  stat_qq_line() + stat_qq()+ facet_wrap(~region) + labs(title = "Polio") 
+ggplot(medDataFiltered, aes(sample = measles, na.rm = T)) + 
+  stat_qq_line() + stat_qq()+ facet_wrap(~region) + labs(title = "Measles")
+ggplot(medDataFiltered, aes(sample = diphtheria, na.rm = T)) + 
+  stat_qq_line() + stat_qq()+ facet_wrap(~region) + labs(title = "Diphtheria")
+
+#Provest ćemo Lillieforsov test samo na podacima za HIV kao primijer, 
+#koristimo ga umjesto KS testa jer ne znamo srednju vrijednost i stdev 
+#populacije
+for(name in unique(data$region)){
+  print(name)
+  print(medDataFiltered %>% filter(region == name) %>%
+          select(une_hiv) %>% unlist %>% lillie.test())
+}
+
+#Provodimo Bartlettov test na svakom od uzoraka kako bi smo provjerili
+#homoskedastičnost
+bartlett.test(medDataFiltered$hepatitis~medDataFiltered$region)
+bartlett.test(medDataFiltered$une_hiv~medDataFiltered$region)
+bartlett.test(medDataFiltered$measles~medDataFiltered$region)
+bartlett.test(medDataFiltered$diphtheria~medDataFiltered$region)
+
+```
+Podaci nisu pretjerano normalni, ipak to možda i ne bi bio pretjerani problem jer je ANOVA relativno robusna na kršenje uvjeta normalnosti.
+No naši problemi ne staju tu, jer naši podaci ne samo da nisu homoskedastični, već je p-vrijednosti provedenih bartlettovih testa za jednakost varijance sežu između redova 10^-3 i 10^-16. To nam, blago rečeno, ne ide u prilog. Jednoparametarska ANOVA čak i je relativno robusna metoda glede kršenja homoskedastičnosti (ne onoliko koliko nama treba), ali samo ako su uzorci jednakih veličina, što nisu.
+Tako da se kao i u prvom zadatku moramo okrenuti neparametarskoj ANOVI, Kruskal-Wallis testu kako bi provjerili sljedeću hipotezu koja se nameće iz postavljenog pitanja:
+
+$$\begin{aligned}H_0: \mu_0 = \mu_1 = \mu_2 = \mu_3 = \mu_4 = \mu_5 \\ H_1: barem \space jedan \space \mu_i \space nije \space jednak  \\ \alpha = 0.05 \end{aligned}$$
+
+```{r}
+kruskal.test(une_hiv~region, medDataFiltered)
+kruskal.test(hepatitis~region, medDataFiltered)
+kruskal.test(measles~region, medDataFiltered)
+kruskal.test(diphtheria~region, medDataFiltered)
+```
+Vidimo da p-vrijednosti donose dosta čvrst zaključak u svakom od 4 provedena testa za hiv, ospice, polio i difteriju, a taj zaključak jest odbacivanje nul hipoteze da su sve stope zaraženosti/imunizacije jednake u korist alternativne da barem jedna nije. 
+Ovo naravno, nije veliki šok jer smo iz prvog pogleda na podatke uočili veliko odstupanje u stopama zaraženosti/imunizacije u Africi, koju je svijet iskorištavao stoljećima i onda ostavio da se sama nosi s posljedicama.
+
+## 5. Postoji li korelacija između konzumacije alkohola i prosječne količine obrazovanja
+
+```{r}
+ggplot(data, aes(x = une_school, y = alcohol, color = region)) + geom_point() + 
+  stat_smooth(formula = y~x, method = "lm", aes(group = 1), se = F) + 
+  scale_y_continuous(limits = c(0, 20))+
+  labs(x = "mean years of schooling [year]", y = "alcohol [l/year]",
+       title = "alcohol~year")
+linModAl <- lm(alcohol~une_school, data)
+summary(linModAl)
+```
+Model nije pretjerano uvjerljiv, ali ne možemo osporiti postojanje nekakve linearne veze s faktorom $R^2 = 0.4$. Interesantno je uočiti da države sa većom stopom obrazovanja konzumiraju više alkohola. $\\$
+Razlozi k tome su sigurno razni i vjerojatno sežu od veće kupovne moći sve do nezdravog nošenja sa stresom. 

@@ -1,0 +1,32 @@
+country : country name
+country_code : Three letter country identifier
+region : Global region of country
+year : year
+life_expect : Life expectancy at birth (years)
+life_exp60 : Life expectancy at age 60 (years)
+adult_mortality : Adult Mortality Rates of both sexes (probability of dying between 15 and 60 years per 1000 population)
+infant_mort : Death rate up to age 1
+age1-4mort : Death rate between ages 1 and 4
+alcohol : Alcohol, recorded per capita (15+) consumption (in litres of pure alcohol)
+bmi : Mean BMI (kg/m^2) (18+) (age-standardized estimate)
+age5-19thinness : Prevalence of thinness among children and adolescents, BMI < (median - 2 s.d.) (crude estimate) (%)
+age5-19obesity : Prevalence of obesity among children and adolescents, BMI > (median + 2 s.d.) (crude estimate) (%)
+hepatitis : Hepatitis B (HepB) immunization coverage among 1-year-olds (%)
+measles : Measles-containing-vaccine first-dose (MCV1) immunization coverage among 1-year-olds (%)
+polio : Polio (Pol3) immunization coverage among 1-year-olds (%)
+diphtheria : Diphtheria tetanus toxoid and pertussis (DTP3) immunization coverage among 1-year-olds (%)
+basic_water : Population using at least basic drinking-water services
+doctors : Medical doctors (per 10,000)
+hospitals : Total density per 100 000 population: Hospitals
+gni_capita : Gross national income per capita (PPP int. $)
+gghe-d : Domestic general government health expenditure (GGHE-D) as percentage of gross domestic product (GDP) (%)
+che_gdp : Current health expenditure (CHE) as percentage of gross domestic product (GDP) (%)
+une_pop : Population (thousands)
+une_infant : Mortality rate, infant (per 1,000 live births)
+une_life : Life expectancy at birth, total (years)
+une_hiv : Prevalence of HIV, total (% of population ages 15-49)
+une_gni : GNI per capita, PPP (current international $)
+une_poverty : Poverty headcount ratio at $1.90 a day (PPP) (% of population)
+une_edu_spend : Government expenditure on education as a percentage of GDP (%)
+une_literacy : Adult literacy rate, population 15+ years, both sexes (%)
+une_school : Mean years of schooling (ISCED 1 or higher), population 25+ years, both sexes
